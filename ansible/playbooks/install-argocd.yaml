@@ -1,0 +1,246 @@
+---
+- name: Install Argo CD on K3s
+  hosts: dell-optiplex
+  become: true
+
+  vars:
+    argocd_version: "v3.6.1"
+    argocd_namespace: "argocd"
+    argocd_host: "argocd.home.arpa"
+    kubectl: /usr/local/bin/k3s kubectl
+    manifest_dir: /opt/argocd
+    tls_dir: /etc/argocd-tls
+
+  tasks:
+    - name: Install dependencies
+      ansible.builtin.apt:
+        name:
+          - curl
+          - openssl
+        state: present
+        update_cache: true
+
+    - name: Create manifest directory
+      ansible.builtin.file:
+        path: "{{ manifest_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Create TLS directory
+      ansible.builtin.file:
+        path: "{{ tls_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Check Kubernetes API
+      ansible.builtin.command:
+        cmd: "{{ kubectl }} get nodes"
+      changed_when: false
+
+    # Namespace
+    - name: Check Argo CD namespace
+      ansible.builtin.command:
+        cmd: "{{ kubectl }} get namespace {{ argocd_namespace }}"
+      register: namespace_check
+      failed_when: false
+      changed_when: false
+
+    - name: Create Argo CD namespace
+      ansible.builtin.command:
+        cmd: "{{ kubectl }} create namespace {{ argocd_namespace }}"
+      when: namespace_check.rc != 0
+
+    # Argo CD installation
+    - name: Download Argo CD manifests
+      ansible.builtin.get_url:
+        url: >-
+          https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/install.yaml
+        dest: "{{ manifest_dir }}/install.yaml"
+        mode: "0644"
+
+    - name: Install Argo CD
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} apply
+          --server-side
+          --force-conflicts
+          -n {{ argocd_namespace }}
+          -f {{ manifest_dir }}/install.yaml
+      register: argocd_install
+      changed_when: >-
+        'created' in argocd_install.stdout or
+        'configured' in argocd_install.stdout
+
+    # Configure Argo CD behind Traefik
+    - name: Read current Argo CD server settings
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} get configmap
+          argocd-cmd-params-cm
+          -n {{ argocd_namespace }}
+          -o json
+      register: argocd_config
+      changed_when: false
+
+    - name: Set desired Argo CD settings
+      ansible.builtin.set_fact:
+        argocd_desired_settings:
+          server.insecure: "true"
+
+    - name: Patch Argo CD server configuration
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/k3s
+          - kubectl
+          - patch
+          - configmap
+          - argocd-cmd-params-cm
+          - -n
+          - "{{ argocd_namespace }}"
+          - --type=merge
+          - -p
+          - '{{ {"data": argocd_desired_settings} | to_json }}'
+      when: >-
+        (argocd_config.stdout | from_json).data
+        ['server.insecure'] | default('') != 'true'
+      register: argocd_patch
+
+    - name: Restart Argo CD server if configuration changed
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} rollout restart
+          deployment/argocd-server
+          -n {{ argocd_namespace }}
+      when: argocd_patch.changed | default(false)
+
+    # Self-signed certificate
+    - name: Generate local TLS certificate
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - req
+          - -x509
+          - -nodes
+          - -newkey
+          - rsa:3072
+          - -days
+          - "365"
+          - -keyout
+          - "{{ tls_dir }}/tls.key"
+          - -out
+          - "{{ tls_dir }}/tls.crt"
+          - -subj
+          - "/CN={{ argocd_host }}"
+          - -addext
+          - "subjectAltName=DNS:{{ argocd_host }}"
+        creates: "{{ tls_dir }}/tls.crt"
+      no_log: true
+
+    - name: Secure TLS private key
+      ansible.builtin.file:
+        path: "{{ tls_dir }}/tls.key"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Create or update Kubernetes TLS Secret
+      ansible.builtin.shell: |
+        set -o pipefail
+        {{ kubectl }} create secret tls argocd-tls \
+          -n {{ argocd_namespace }} \
+          --cert={{ tls_dir }}/tls.crt \
+          --key={{ tls_dir }}/tls.key \
+          --dry-run=client -o yaml | \
+        {{ kubectl }} apply -f -
+      args:
+        executable: /bin/bash
+      register: tls_secret
+      changed_when: >-
+        'created' in tls_secret.stdout or
+        'configured' in tls_secret.stdout
+      no_log: true
+
+    # Ingress
+    - name: Create Argo CD Ingress manifest
+      ansible.builtin.copy:
+        dest: "{{ manifest_dir }}/ingress.yaml"
+        mode: "0644"
+        content: |
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: argocd-server
+            namespace: {{ argocd_namespace }}
+            annotations:
+              traefik.ingress.kubernetes.io/router.entrypoints: websecure
+          spec:
+            ingressClassName: traefik
+            tls:
+              - hosts:
+                  - {{ argocd_host }}
+                secretName: argocd-tls
+            rules:
+              - host: {{ argocd_host }}
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: argocd-server
+                          port:
+                            number: 80
+
+    - name: Apply Argo CD Ingress
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} apply
+          -f {{ manifest_dir }}/ingress.yaml
+      register: ingress_apply
+      changed_when: >-
+        'created' in ingress_apply.stdout or
+        'configured' in ingress_apply.stdout
+
+    # Validation
+    - name: Wait for Argo CD server
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} rollout status
+          deployment/argocd-server
+          -n {{ argocd_namespace }}
+          --timeout=300s
+      changed_when: false
+
+    - name: Wait for Argo CD components
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} rollout status
+          deployment/{{ item }}
+          -n {{ argocd_namespace }}
+          --timeout=300s
+      loop:
+        - argocd-repo-server
+        - argocd-redis
+        - argocd-applicationset-controller
+        - argocd-dex-server
+        - argocd-notifications-controller
+      changed_when: false
+
+    - name: Verify Argo CD ingress
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} get ingress
+          -n {{ argocd_namespace }}
+      register: ingress_status
+      changed_when: false
+
+    - name: Display installation result
+      ansible.builtin.debug:
+        msg:
+          - "Argo CD installed"
+          - "Version: {{ argocd_version }}"
+          - "URL: https://{{ argocd_host }}"
+          - "TLS: self-signed"
+          - "{{ ingress_status.stdout }}"

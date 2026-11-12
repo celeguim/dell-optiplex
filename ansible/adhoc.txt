@@ -37,3 +37,16 @@ ssh celeguim@192.168.3.125 sudo k3s kubectl get svc nginx
 
 # traefik
 ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/install-traefik-ingress.yaml
+ssh celeguim@192.168.3.125 sudo k3s kubectl get svc traefik -n kube-system -o jsonpath={.status.loadBalancer.ingress[0].ip}
+
+
+# ArgoCD
+ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/install-argocd.yaml
+
+# senha do argo
+ssh celeguim@192.168.3.125 \
+sudo k3s kubectl get secret \
+  argocd-initial-admin-secret \
+  -n argocd \
+  -o jsonpath='{.data.password}' | base64 -d
+echo
