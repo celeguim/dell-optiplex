@@ -1,5 +1,5 @@
 all:
   hosts:
-    dell:
+    dell-optiplex:
       ansible_host: 192.168.3.125
       ansible_user: celeguim

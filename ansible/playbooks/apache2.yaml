@@ -1,6 +1,6 @@
 ---
 - name: Install and configure Apache
-  hosts: minisforum
+  hosts: all
   become: true
 
   tasks:

@@ -5,17 +5,14 @@ ANSIBLE_CONFIG=ansible.cfg ansible all -m ping -i inventory.yaml
 ANSIBLE_CONFIG=ansible.cfg ansible all -i inventory.yaml -m ansible.builtin.shell --args 'hostname; date; df -kh'
 
 # yum update / root
-ANSIBLE_CONFIG=ansible.cfg ansible all -i inventory.yaml -m ansible.builtin.shell --args 'apt update' --become
-ANSIBLE_CONFIG=ansible.cfg ansible minisforum -i inventory.yaml -m ansible.builtin.shell --args 'apt update' --become
+ANSIBLE_CONFIG=ansible.cfg ansible all -i inventory.yaml -m ansible.builtin.shell \
+--args 'apt update && apt -y upgrade && apt autoclean' --become
 
 # service status / root
-ANSIBLE_CONFIG=ansible.cfg ansible server3 -i inventory.yaml -m ansible.builtin.service --args 'name=httpd state=started' --become
-ANSIBLE_CONFIG=ansible.cfg ansible minisforum -i inventory.yaml -m ansible.builtin.shell --args 'systemctl status apache2'
+ANSIBLE_CONFIG=ansible.cfg ansible all -i inventory.yaml -m ansible.builtin.service --args 'name=httpd state=started' --become
 
 # install/configure apache
-ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml apache2.yaml --limit minisforum
+ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml apache2.yaml --limit dell-optiplex
 
 # configurar rede estatica
-ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/netplan.yaml --limit minisforum --become -vvv
-ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/netplan.yaml --limit nipogi --become -vvv
-ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/netplan.yaml --limit raspberry --become -vvv
+ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/netplan.yaml --limit dell-optiplex --become -vvv
