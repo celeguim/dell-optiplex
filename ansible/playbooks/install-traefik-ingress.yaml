@@ -1,0 +1,215 @@
+---
+- name: Configure Traefik Ingress with MetalLB
+  hosts: dell-optiplex
+  become: true
+
+  vars:
+    kubectl: /usr/local/bin/k3s
+    traefik_ip: "192.168.3.230"
+    metallb_pool: "local-pool"
+    app_host: "app.home.arpa"
+    demo_namespace: "demo"
+
+    manifests_dir: /var/lib/rancher/k3s/server/manifests
+    demo_file: /tmp/traefik-ingress-demo.yaml
+
+  tasks:
+    - name: Check K3s API
+      ansible.builtin.command:
+        cmd: "{{ kubectl }} kubectl get nodes"
+      changed_when: false
+
+    - name: Check MetalLB pool
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} kubectl get ipaddresspool
+          {{ metallb_pool }} -n metallb-system
+      changed_when: false
+
+    - name: Check Traefik HelmChart
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} kubectl get helmchart
+          traefik -n kube-system
+      changed_when: false
+
+    - name: Check existing Traefik customization
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} kubectl get helmchartconfig
+          traefik -n kube-system -o name
+      register: existing_traefik_config
+      failed_when: false
+      changed_when: false
+
+    # - name: Prevent overwriting existing customization
+    #   ansible.builtin.assert:
+    #     that:
+    #       - existing_traefik_config.rc == 1
+    #     fail_msg: >-
+    #       Traefik already has a HelmChartConfig.
+    #       Merge the values manually before continuing.
+
+    - name: Check managed Traefik config file
+      ansible.builtin.stat:
+        path: "{{ manifests_dir }}/traefik-config.yaml"
+      register: managed_traefik_config
+
+    - name: Prevent conflicting Traefik configuration
+      ansible.builtin.assert:
+        that:
+          - >-
+            existing_traefik_config.rc == 1 or
+            managed_traefik_config.stat.exists
+        fail_msg: "Existing Traefik customization requires review."
+
+    - name: Configure Traefik LoadBalancer
+      ansible.builtin.copy:
+        dest: "{{ manifests_dir }}/traefik-config.yaml"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          apiVersion: helm.cattle.io/v1
+          kind: HelmChartConfig
+          metadata:
+            name: traefik
+            namespace: kube-system
+          spec:
+            valuesContent: |-
+              service:
+                spec:
+                  type: LoadBalancer
+                annotations:
+                  metallb.io/address-pool: {{ metallb_pool }}
+                  metallb.io/loadBalancerIPs: {{ traefik_ip }}
+
+              providers:
+                kubernetesIngress:
+                  enabled: true
+
+              ingressClass:
+                enabled: true
+                isDefaultClass: true
+
+    - name: Wait for Traefik LoadBalancer IP
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} kubectl get svc traefik
+          -n kube-system
+          -o jsonpath={.status.loadBalancer.ingress[0].ip}
+      register: traefik_external_ip
+      changed_when: false
+      until: traefik_external_ip.stdout == traefik_ip
+      retries: 30
+      delay: 10
+
+    - name: Wait for Traefik rollout
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} kubectl rollout status
+          deployment/traefik -n kube-system
+          --timeout=180s
+      changed_when: false
+
+    - name: Create demo manifests
+      ansible.builtin.copy:
+        dest: "{{ demo_file }}"
+        mode: "0644"
+        content: |
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: {{ demo_namespace }}
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx
+            namespace: {{ demo_namespace }}
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                  - name: nginx
+                    image: nginx:stable
+                    ports:
+                      - containerPort: 80
+                    resources:
+                      requests:
+                        cpu: 50m
+                        memory: 64Mi
+                      limits:
+                        cpu: 250m
+                        memory: 128Mi
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: nginx
+            namespace: {{ demo_namespace }}
+          spec:
+            type: ClusterIP
+            selector:
+              app: nginx
+            ports:
+              - port: 80
+                targetPort: 80
+          ---
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: nginx
+            namespace: {{ demo_namespace }}
+          spec:
+            ingressClassName: traefik
+            rules:
+              - host: {{ app_host }}
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: nginx
+                          port:
+                            number: 80
+
+    - name: Deploy Nginx and Ingress
+      ansible.builtin.command:
+        cmd: "{{ kubectl }} kubectl apply -f {{ demo_file }}"
+      register: deploy_result
+      changed_when: >-
+        'created' in deploy_result.stdout or
+        'configured' in deploy_result.stdout
+
+    - name: Wait for Nginx
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} kubectl rollout status
+          deployment/nginx -n {{ demo_namespace }}
+          --timeout=180s
+      changed_when: false
+
+    - name: Test Ingress HTTP routing
+      ansible.builtin.uri:
+        url: "http://{{ traefik_ip }}/"
+        headers:
+          Host: "{{ app_host }}"
+        status_code: 200
+        return_content: false
+      register: ingress_test
+      until: ingress_test.status | default(0) == 200
+      retries: 12
+      delay: 5
+
+    - name: Show Ingress URL
+      ansible.builtin.debug:
+        msg: "Ingress ready: http://{{ app_host }}"

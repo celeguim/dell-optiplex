@@ -12,7 +12,28 @@ ANSIBLE_CONFIG=ansible.cfg ansible all -i inventory.yaml -m ansible.builtin.shel
 ANSIBLE_CONFIG=ansible.cfg ansible all -i inventory.yaml -m ansible.builtin.service --args 'name=httpd state=started' --become
 
 # install/configure apache
-ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml apache2.yaml --limit dell-optiplex
+ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/apache2.yaml --limit dell-optiplex
 
 # configurar rede estatica
 ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/netplan.yaml --limit dell-optiplex --become -vvv
+
+# install k3s
+ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/k3s-install.yaml
+
+# test k8s
+ssh celeguim@192.168.3.125 sudo k3s kubectl get nodes 
+
+# install MetalLB
+ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/metallb-install.yaml
+
+ssh celeguim@192.168.3.125 sudo k3s kubectl get all -n metallb-system; 
+
+ssh celeguim@192.168.3.125 sudo k3s kubectl create deployment nginx --image=nginx:stable
+
+ssh celeguim@192.168.3.125 sudo k3s kubectl expose deployment nginx \
+  --type=LoadBalancer   --port=80   --target-port=80
+
+ssh celeguim@192.168.3.125 sudo k3s kubectl get svc nginx
+
+# traefik
+ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/install-traefik-ingress.yaml

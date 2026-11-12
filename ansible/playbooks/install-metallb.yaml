@@ -1,0 +1,132 @@
+---
+- name: Install MetalLB on K3s
+  hosts: dell-optiplex
+  become: true
+
+  vars:
+    metallb_version: "v0.16.2"
+    metallb_pool_start: "192.168.3.230"
+    metallb_pool_end: "192.168.3.240"
+    metallb_interface: "enp0s31f6"
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    kubectl: /usr/local/bin/k3s kubectl
+
+  tasks:
+    - name: Verify K3s installation
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+
+    - name: Ensure K3s is installed
+      ansible.builtin.assert:
+        that:
+          - k3s_binary.stat.exists
+        fail_msg: "K3s is not installed."
+
+    - name: Create K3s configuration directory
+      ansible.builtin.file:
+        path: /etc/rancher/k3s/config.yaml.d
+        state: directory
+        mode: "0755"
+
+    - name: Disable K3s ServiceLB
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml.d/90-metallb.yaml
+        content: |
+          disable:
+            - servicelb
+        owner: root
+        group: root
+        mode: "0644"
+      register: k3s_config
+
+    - name: Restart K3s when configuration changes
+      ansible.builtin.systemd:
+        name: k3s
+        state: restarted
+      when: k3s_config.changed
+
+    - name: Wait for Kubernetes API
+      ansible.builtin.command:
+        cmd: "{{ kubectl }} get nodes"
+      register: k3s_ready
+      until: k3s_ready.rc == 0
+      retries: 30
+      delay: 5
+      changed_when: false
+
+    - name: Download MetalLB manifest
+      ansible.builtin.get_url:
+        url: >-
+          https://raw.githubusercontent.com/metallb/metallb/{{ metallb_version }}/config/manifests/metallb-native.yaml
+        dest: /tmp/metallb-native.yaml
+        mode: "0644"
+
+    - name: Install MetalLB
+      ansible.builtin.command:
+        cmd: "{{ kubectl }} apply -f /tmp/metallb-native.yaml"
+      register: metallb_install
+      changed_when: >-
+        'created' in metallb_install.stdout or
+        'configured' in metallb_install.stdout
+
+    - name: Wait for MetalLB controller
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} rollout status
+          deployment/controller
+          -n metallb-system
+          --timeout=180s
+      changed_when: false
+
+    - name: Wait for MetalLB speaker
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl }} rollout status
+          daemonset/speaker
+          -n metallb-system
+          --timeout=180s
+      changed_when: false
+
+    - name: Create MetalLB IP pool configuration
+      ansible.builtin.copy:
+        dest: /tmp/metallb-pool.yaml
+        mode: "0644"
+        content: |
+          apiVersion: metallb.io/v1beta1
+          kind: IPAddressPool
+          metadata:
+            name: local-pool
+            namespace: metallb-system
+          spec:
+            addresses:
+              - {{ metallb_pool_start }}-{{ metallb_pool_end }}
+          ---
+          apiVersion: metallb.io/v1beta1
+          kind: L2Advertisement
+          metadata:
+            name: local-l2
+            namespace: metallb-system
+          spec:
+            ipAddressPools:
+              - local-pool
+            interfaces:
+              - {{ metallb_interface }}
+
+    - name: Apply MetalLB IP pool
+      ansible.builtin.command:
+        cmd: "{{ kubectl }} apply -f /tmp/metallb-pool.yaml"
+      register: metallb_pool_apply
+      changed_when: >-
+        'created' in metallb_pool_apply.stdout or
+        'configured' in metallb_pool_apply.stdout
+
+    - name: Verify MetalLB resources
+      ansible.builtin.command:
+        cmd: "{{ kubectl }} get ipaddresspools,l2advertisements -n metallb-system"
+      register: metallb_status
+      changed_when: false
+
+    - name: Display MetalLB status
+      ansible.builtin.debug:
+        var: metallb_status.stdout_lines

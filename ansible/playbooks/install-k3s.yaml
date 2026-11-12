@@ -1,0 +1,119 @@
+---
+- name: Install Docker and K3s on Ubuntu
+  hosts: dell-optiplex
+  become: true
+
+  vars:
+    k3s_node_ip: "192.168.3.125"
+
+  tasks:
+    - name: Install dependencies
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: true
+
+    # Docker Engine
+    - name: Create APT keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Download Docker GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Get Debian architecture
+      ansible.builtin.command: dpkg --print-architecture
+      register: docker_arch
+      changed_when: false
+
+    - name: Configure Docker repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/docker.sources
+        mode: "0644"
+        content: |
+          Types: deb
+          URIs: https://download.docker.com/linux/ubuntu
+          Suites: {{ ansible_distribution_release }}
+          Components: stable
+          Architectures: {{ docker_arch.stdout }}
+          Signed-By: /etc/apt/keyrings/docker.asc
+
+    - name: Install Docker packages
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Enable Docker service
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    # K3s
+    - name: Check existing K3s installation
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+
+    - name: Download K3s installer
+      ansible.builtin.get_url:
+        url: https://get.k3s.io
+        dest: /tmp/install-k3s.sh
+        mode: "0755"
+      when: not k3s_binary.stat.exists
+
+    - name: Install K3s server
+      ansible.builtin.command:
+        cmd: /bin/sh /tmp/install-k3s.sh
+        creates: /usr/local/bin/k3s
+      environment:
+        INSTALL_K3S_EXEC: >-
+          server
+          --node-ip={{ k3s_node_ip }}
+          --tls-san={{ k3s_node_ip }}
+      when: not k3s_binary.stat.exists
+
+    - name: Enable K3s service
+      ansible.builtin.systemd:
+        name: k3s
+        enabled: true
+        state: started
+
+    # Validation
+    - name: Wait for K3s node to become Ready
+      ansible.builtin.command:
+        cmd: /usr/local/bin/k3s kubectl get nodes --no-headers
+      register: k3s_nodes
+      changed_when: false
+      until:
+        - k3s_nodes.rc == 0
+        - "' Ready ' in (' ' + k3s_nodes.stdout + ' ')"
+      retries: 30
+      delay: 10
+
+    - name: Show Kubernetes nodes
+      ansible.builtin.debug:
+        var: k3s_nodes.stdout_lines
+
+    - name: Verify Docker
+      ansible.builtin.command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Show Docker version
+      ansible.builtin.debug:
+        var: docker_version.stdout
