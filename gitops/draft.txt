@@ -1,0 +1,4 @@
+
+scp bootstrap/nginx-application.yaml celeguim@192.168.3.125:
+
+sudo k3s kubectl apply -f nginx-application.yaml
