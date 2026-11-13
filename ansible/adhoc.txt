@@ -50,3 +50,5 @@ sudo k3s kubectl get secret \
   -n argocd \
   -o jsonpath='{.data.password}' | base64 -d
 echo
+
+sudo k3s kubectl scale deployment nginx   -n demo --replicas=3

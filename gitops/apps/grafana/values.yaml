@@ -1,0 +1,40 @@
+replicas: 1
+
+service:
+  type: ClusterIP
+
+admin:
+  existingSecret: grafana-admin
+  userKey: admin-user
+  passwordKey: admin-password
+
+persistence:
+  enabled: true
+  type: pvc
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  size: 2Gi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+ingress:
+  enabled: true
+  ingressClassName: traefik
+  hosts:
+    - grafana.home.arpa
+  path: /
+  pathType: Prefix
+
+grafana.ini:
+  server:
+    domain: grafana.home.arpa
+    root_url: http://grafana.home.arpa
+  users:
+    allow_sign_up: false
