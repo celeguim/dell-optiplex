@@ -1,70 +1,66 @@
-# Grafana GitOps add-on — Dell OptiPlex / K3s
+# Observability GitOps — Dell OptiPlex K3s
 
-This package adds a Grafana Application to the existing GitOps repository.
+Add these paths to the existing repository (which already deploys nginx and Grafana).
 
-## 1. Copy into your Git repository
+## Prerequisites
 
-Copy the `gitops/` directory onto the existing repository's `gitops/` directory.
-Edit `gitops/bootstrap/grafana-application.yaml` and replace `REPLACE_GIT_REPO_URL` with the same Git repository URL used for Nginx. The branch is `main`; change if needed.
+- Argo CD working on K3s
+- Existing Grafana in namespace `monitoring`, managed by Argo CD
+- K3s `local-path` StorageClass available
+- Enough free disk/memory for Prometheus
+- Confirm the Helm chart version `92.7.0` is accessible and supported by your K3s version
 
-## 2. Create admin credentials outside Git
+## 1. Configure and push
 
-Create the namespace and a secret on the Dell OptiPlex before the first Argo CD synchronization:
+Replace `REPLACE_GIT_REPO_URL` in `gitops/bootstrap/monitoring-application.yaml` with the exact same Git repository URL used in the nginx Application. Push everything to `main`.
 
-```bash
-sudo k3s kubectl create namespace monitoring --dry-run=client -o yaml | sudo k3s kubectl apply -f -
-read -rsp 'Grafana admin password: ' GRAFANA_PASSWORD; echo
-sudo k3s kubectl -n monitoring create secret generic grafana-admin \
-  --from-literal=admin-user=admin \
-  --from-literal=admin-password="$GRAFANA_PASSWORD" \
-  --dry-run=client -o yaml | sudo k3s kubectl apply -f -
-unset GRAFANA_PASSWORD
+## 2. Bootstrap the stack
+
+```sh
+sudo k3s kubectl apply -f gitops/bootstrap/monitoring-application.yaml
+sudo k3s kubectl get application monitoring-stack -n argocd
+sudo k3s kubectl get pods,pvc,svc -n monitoring
+sudo k3s kubectl get prometheus -n monitoring
 ```
 
-Do not commit the secret or password to Git.
+Note: The first sync installs CRDs, which may take several minutes to become established. If Argo CD reports missing CRDs, inspect its sync operation and retry after CRDs are ready. Do not delete the existing Grafana Application.
 
-## 3. Commit and push
+## 3. Validate Prometheus
 
-```bash
-git add gitops/apps/grafana gitops/bootstrap/grafana-application.yaml
-git commit -m "feat: deploy grafana with Argo CD"
-git push origin main
+Check the actual service name (it should be `monitoring-stack-kube-prom-prometheus` for this release):
+
+```sh
+sudo k3s kubectl get svc -n monitoring | grep prometheus
+sudo k3s kubectl -n monitoring port-forward svc/monitoring-stack-kube-prom-prometheus 9090:9090
 ```
 
-## 4. Bootstrap
+Open http://localhost:9090/targets from the machine where port-forward runs. The Prometheus UI should only be exposed via local port-forward; it has no public Ingress.
 
-After the commit is pushed, run from the repo's root on a system with K3s admin credentials:
+## 4. Integrate existing Grafana
 
-```bash
-sudo k3s kubectl apply -f gitops/bootstrap/grafana-application.yaml
+MERGE `gitops/apps/monitoring/grafana-values-additions.yaml` into the existing `gitops/apps/grafana/values.yaml` (only the `datasources` section). Do not replace existing values. If `datasources` already exists, merge into its `datasources.yaml.datasources` array; avoid duplicate default datasources.
+
+Commit and push. Wait for the pre-existing Grafana Argo CD Application to sync. In Grafana → Connections → Data sources, test `Prometheus`. The expected service is
+`http://monitoring-stack-kube-prom-prometheus.monitoring.svc.cluster.local:9090`.
+
+Useful starter dashboards can be imported in Grafana manually using dashboard IDs 1860 (Node Exporter Full) and 15757 (Kubernetes views; verify compatibility), or provisioned later as Git-managed dashboard JSON.
+
+## 5. Basic PromQL checks
+
+```promql
+up
+sum(rate(container_cpu_usage_seconds_total{container!="",image!=""}[5m])) by (namespace)
+sum(container_memory_working_set_bytes{container!="",image!=""}) by (namespace)
+node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100
+kube_pod_status_phase{phase="Running"}
 ```
 
-Alternatively submit the same Application manifest in the Argo CD UI.
-
-## 5. Access
-
-Add to the workstation's hosts file (or internal DNS):
-
-```
-192.168.3.230 grafana.home.arpa
-```
-
-Open http://grafana.home.arpa, user `admin` and the password you created above.
-
-## 6. Validate
-
-```bash
-sudo k3s kubectl get application grafana -n argocd
-sudo k3s kubectl get pods,svc,ingress,pvc -n monitoring
-sudo k3s kubectl get storageclass
-curl -I -H 'Host: grafana.home.arpa' http://192.168.3.230/login
-```
+Metrics availability depends on the K3s version and enabled kubelet/cAdvisor collectors. To diagnose missing data, start with `up` and the Prometheus Targets view.
 
 ## Notes
 
-- Chart pinned to 12.8.0 from grafana-community (verify compatibility before upgrading).
-- Argo CD multi-source Application: chart from official Helm repo, `values.yaml` from Git.
-- `local-path` stores data on the Dell node; there is no high availability or off-node backup.
-- This example uses HTTP only on the trusted LAN. For production or untrusted networks, configure TLS, authentication hardening, and backups.
-- The admin Secret is deliberately not managed by this Argo CD Application.
-- Grafana is a visualization platform. Prometheus metrics are not yet configured.
+- Grafana is **not** installed twice: `grafana.enabled: false`.
+- Prometheus PVC uses local-path and is bound to the Dell node: no HA or remote durability.
+- No Traefik Ingress or MetalLB IP is allocated for Prometheus; it stays ClusterIP.
+- `alertmanager.enabled: false` keeps the first iteration light; add alerting after basic metric validation.
+- Verify CRD upgrade steps before upgrading chart major versions.

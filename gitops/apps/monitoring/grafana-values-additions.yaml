@@ -1,0 +1,15 @@
+# MERGE these keys into the existing gitops/apps/grafana/values.yaml
+# Do not replace the existing file: preserve persistence, ingress, admin secret, etc.
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://monitoring-stack-kube-prom-prometheus.monitoring.svc.cluster.local:9090
+        isDefault: true
+        editable: false
+        jsonData:
+          timeInterval: 30s

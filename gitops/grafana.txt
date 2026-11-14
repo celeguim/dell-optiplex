@@ -1,3 +1,4 @@
+# criar password
 sudo k3s kubectl create namespace monitoring \
   --dry-run=client -o yaml | \
   sudo k3s kubectl apply -f -
@@ -11,3 +12,4 @@ sudo k3s kubectl -n monitoring create secret generic grafana-admin \
   --dry-run=client -o yaml | sudo k3s kubectl apply -f -
 
 unset GRAFANA_PASSWORD
+
