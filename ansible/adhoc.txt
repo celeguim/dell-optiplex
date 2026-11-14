@@ -52,3 +52,6 @@ sudo k3s kubectl get secret \
 echo
 
 sudo k3s kubectl scale deployment nginx   -n demo --replicas=3
+
+ssh celeguim@192.168.3.125 "sudo cat /etc/rancher/k3s/k3s.yaml"   > ~/.kube/dell-optiplex.yaml
+sed -i '' 's/127\.0\.0\.1/192.168.3.125/g' ~/.kube/dell-optiplex.yaml
