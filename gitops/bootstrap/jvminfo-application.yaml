@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jvminfo-v11
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/celeguim/jvminfo.git
+    targetRevision: jvminfo-v11
+    path: gitops/apps/jvminfo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: jvminfo
+  syncPolicy:
+    automated:
+      enabled: true
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
