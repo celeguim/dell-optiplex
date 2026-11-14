@@ -38,3 +38,15 @@ grafana.ini:
     root_url: http://grafana.home.arpa
   users:
     allow_sign_up: false
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://monitoring-stack-kube-prom-prometheus.monitoring.svc.cluster.local:9090
+        isDefault: true
+        editable: false
