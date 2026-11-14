@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: jvminfo
-          image: celeguim/jvminfo:jvminfo-v11
+          image: celeguim/jvminfo:v10
           readinessProbe:
             httpGet:
               path: /
