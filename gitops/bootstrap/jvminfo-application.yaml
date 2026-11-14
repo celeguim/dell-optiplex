@@ -6,8 +6,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/celeguim/jvminfo.git
-    targetRevision: jvminfo-v11
+    repoURL: https://github.com/celeguim/dell-optiplex.git
+    targetRevision: main
     path: gitops/apps/jvminfo
   destination:
     server: https://kubernetes.default.svc
