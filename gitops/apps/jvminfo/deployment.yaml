@@ -17,13 +17,13 @@ spec:
     spec:
       containers:
         - name: jvminfo
-          image: celeguim/jvminfo:v10
-          # readinessProbe:
-          #   httpGet:
-          #     path: /
-          #     port: 8080
-          #   initialDelaySeconds: 2
-          #   periodSeconds: 5
+          image: celeguim/jvminfo:v11
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
           resources:
             requests:
               cpu: 100m
