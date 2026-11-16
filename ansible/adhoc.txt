@@ -18,13 +18,13 @@ ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/apache2.
 ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/netplan.yaml --limit dell-optiplex --become -vvv
 
 # install k3s
-ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/k3s-install.yaml
+ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/install-k3s.yaml
 
 # test k8s
 ssh celeguim@192.168.3.125 sudo k3s kubectl get nodes 
 
 # install MetalLB
-ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/metallb-install.yaml
+ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/install-metallb.yaml
 
 ssh celeguim@192.168.3.125 sudo k3s kubectl get all -n metallb-system; 
 
@@ -44,14 +44,15 @@ ssh celeguim@192.168.3.125 sudo k3s kubectl get svc traefik -n kube-system -o js
 ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/install-argocd.yaml
 
 # senha do argo
-ssh celeguim@192.168.3.125 \
-sudo k3s kubectl get secret \
-  argocd-initial-admin-secret \
-  -n argocd \
+ssh celeguim@192.168.3.125 sudo k3s kubectl get secret \
+  argocd-initial-admin-secret   -n argocd \
   -o jsonpath='{.data.password}' | base64 -d
-echo
 
 sudo k3s kubectl scale deployment nginx   -n demo --replicas=3
 
 ssh celeguim@192.168.3.125 "sudo cat /etc/rancher/k3s/k3s.yaml"   > ~/.kube/dell-optiplex.yaml
 sed -i '' 's/127\.0\.0\.1/192.168.3.125/g' ~/.kube/dell-optiplex.yaml
+
+
+------ Uninstall
+ssh celeguim@192.168.3.125 /usr/local/bin/k3s-uninstall.sh; rm -rf /var/lib/rancher/; rm -rf /etc/rancher/;

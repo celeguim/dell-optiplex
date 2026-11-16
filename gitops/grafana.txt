@@ -13,3 +13,10 @@ sudo k3s kubectl -n monitoring create secret generic grafana-admin \
 
 unset GRAFANA_PASSWORD
 
+Dashboards:
+Node Exporter: 1860
+k8s: 
+  ID 15757
+  ID 22523
+  ID 25799
+  
