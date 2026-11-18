@@ -55,4 +55,4 @@ sed -i '' 's/127\.0\.0\.1/192.168.3.125/g' ~/.kube/dell-optiplex.yaml
 
 
 ------ Uninstall
-ssh celeguim@192.168.3.125 /usr/local/bin/k3s-uninstall.sh; rm -rf /var/lib/rancher/; rm -rf /etc/rancher/;
+ssh celeguim@192.168.3.125 /usr/local/bin/k3s-uninstall.sh; sudo rm -rf /var/lib/rancher/; sudo rm -rf /etc/rancher/;
