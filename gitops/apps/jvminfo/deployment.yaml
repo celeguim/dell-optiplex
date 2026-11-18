@@ -18,12 +18,6 @@ spec:
       containers:
         - name: jvminfo
           image: celeguim/jvminfo:v11
-          # readinessProbe:
-          #   httpGet:
-          #     path: /actuator/health
-          #     port: 8080
-          #   initialDelaySeconds: 2
-          #   periodSeconds: 5
           resources:
             requests:
               cpu: 100m
@@ -31,3 +25,29 @@ spec:
             limits:
               cpu: 250m
               memory: 256Mi
+
+          # STARTUP: Dá até 3 minutos para o app subir, conectar no MySQL e criar as tabelas
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            failureThreshold: 18
+            periodSeconds: 10
+
+          # LIVENESS: Se falhar 3 vezes seguidas (30s), o K8s reinicia o Pod (morte cerebral)
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # READINESS: Se o MySQL ou Rabbit caírem por 30s, o Pod para de receber tráfego HTTP
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
