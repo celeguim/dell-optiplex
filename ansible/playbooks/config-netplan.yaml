@@ -13,7 +13,7 @@
         content: |
           network:
             version: 2
-            renderer: NetworkManager
+            renderer: networkd
             ethernets:
               enp0s31f6:
                 dhcp4: no

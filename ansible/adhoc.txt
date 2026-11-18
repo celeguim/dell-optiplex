@@ -6,7 +6,7 @@ ANSIBLE_CONFIG=ansible.cfg ansible all -i inventory.yaml -m ansible.builtin.shel
 
 # yum update / root
 ANSIBLE_CONFIG=ansible.cfg ansible all -i inventory.yaml -m ansible.builtin.shell \
---args 'apt update && apt -y upgrade && apt autoclean' --become
+--args 'apt update && apt -y upgrade && apt autoclean' --become -vvv
 
 # service status / root
 ANSIBLE_CONFIG=ansible.cfg ansible all -i inventory.yaml -m ansible.builtin.service --args 'name=httpd state=started' --become
@@ -15,7 +15,7 @@ ANSIBLE_CONFIG=ansible.cfg ansible all -i inventory.yaml -m ansible.builtin.serv
 ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/apache2.yaml --limit dell-optiplex
 
 # configurar rede estatica
-ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/netplan.yaml --limit dell-optiplex --become -vvv
+ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/config-netplan.yaml --limit dell-optiplex --become -vvv
 
 # install k3s
 ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i inventory.yaml playbooks/install-k3s.yaml
